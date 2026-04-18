@@ -32,6 +32,7 @@ def get_s3_client():
 async def upload_recording(
     audio: UploadFile = File(...),
     timestamp: str = Form(...),
+    user_id: str = Form(...),
 ):
     bucket_name = os.getenv("AWS_S3_BUCKET_NAME")
     if not bucket_name:
@@ -49,8 +50,12 @@ async def upload_recording(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="timestamp must be a valid ISO format string.") from exc
 
+    user_id = user_id.strip()
+    if not user_id:
+        raise HTTPException(status_code=400, detail="user_id must be a non-empty string.")
+
     safe_timestamp = parsed_timestamp.isoformat().replace(":", "-")
-    filename = f"recording_{safe_timestamp}.m4a"
+    filename = f"{user_id}/recording_{safe_timestamp}.m4a"
 
     file_bytes = await audio.read()
     s3_client = get_s3_client()
