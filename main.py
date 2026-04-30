@@ -1,10 +1,15 @@
 import os
 from datetime import datetime
 from io import BytesIO
+from typing import List, Optional
 
+import anthropic
 import boto3
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-
+from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
+from groq import Groq
+from openai import OpenAI
+from pydantic import BaseModel
+from supabase import create_client
 
 app = FastAPI()
 
@@ -28,8 +33,88 @@ def get_s3_client():
     )
 
 
+class CoffeeChatExtraction(BaseModel):
+    person_name: Optional[str] = None
+    company: Optional[str] = None
+    role: Optional[str] = None
+    takeaways: List[str] = []
+    follow_ups: List[str] = []
+
+
+async def process_recording(bucket_name: str, filename: str, user_id: str, chat_date: datetime):
+    # 1. Download audio from S3
+    s3 = boto3.client(
+        "s3",
+        region_name=os.getenv("AWS_REGION"),
+        aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
+        aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
+    )
+    obj = s3.get_object(Bucket=bucket_name, Key=filename)
+    audio_bytes = obj["Body"].read()
+
+    # 2. Transcribe with Groq
+    groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+    transcription = groq_client.audio.transcriptions.create(
+        file=("recording.m4a", audio_bytes, "audio/mp4"),
+        model="whisper-large-v3",
+    )
+    transcript = transcription.text
+
+    # 3. Extract structured info with Claude
+    anthropic_client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+    response = anthropic_client.messages.parse(
+        model="claude-opus-4-7",
+        max_tokens=1024,
+        messages=[{
+            "role": "user",
+            "content": (
+                "Extract structured information from this coffee chat debrief. "
+                "person_name, company, and role refer to the person being interviewed, not the speaker. "
+                "takeaways are key things learned from the conversation. "
+                "follow_ups are specific actions to take after the chat.\n\n"
+                f"Transcript:\n{transcript}"
+            ),
+        }],
+        output_format=CoffeeChatExtraction,
+    )
+    extracted = response.parsed_output
+
+    # 4. Build enriched text for embedding
+    embed_text = (
+        f"Person: {extracted.person_name or 'Unknown'}\n"
+        f"Company: {extracted.company or 'Unknown'}\n"
+        f"Role: {extracted.role or 'Unknown'}\n"
+        f"Takeaways: {' | '.join(extracted.takeaways)}\n"
+        f"Follow-ups: {' | '.join(extracted.follow_ups)}\n\n"
+        f"Transcript: {transcript}"
+    )
+
+    # 5. Embed with OpenAI
+    openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+    embedding_response = openai_client.embeddings.create(
+        model="text-embedding-3-small",
+        input=embed_text[:8000],
+    )
+    embedding = embedding_response.data[0].embedding
+
+    # 6. Store in Supabase
+    supabase = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_SERVICE_KEY"))
+    supabase.table("coffee_chat_notes").insert({
+        "user_id": user_id,
+        "person_name": extracted.person_name,
+        "company": extracted.company,
+        "role": extracted.role,
+        "chat_date": chat_date.isoformat(),
+        "transcript": transcript,
+        "takeaways": extracted.takeaways,
+        "follow_ups": extracted.follow_ups,
+        "embedding": embedding,
+    }).execute()
+
+
 @app.post("/upload-recording")
 async def upload_recording(
+    background_tasks: BackgroundTasks,
     audio: UploadFile = File(...),
     timestamp: str = Form(...),
     user_id: str = Form(...),
@@ -42,7 +127,6 @@ async def upload_recording(
         )
 
     if audio.content_type not in {"audio/mp4", "audio/x-m4a", "application/octet-stream"}:
-        # Some clients send m4a as octet-stream, so we allow that too.
         raise HTTPException(status_code=400, detail="Uploaded file must be an m4a audio file.")
 
     try:
@@ -69,5 +153,7 @@ async def upload_recording(
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail="Failed to upload file to S3.") from exc
+
+    background_tasks.add_task(process_recording, bucket_name, filename, user_id, parsed_timestamp)
 
     return {"status": "success", "filename": filename}
