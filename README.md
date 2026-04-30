@@ -22,7 +22,7 @@ AWS S3  →  [transcription + processing pipeline — not yet built]
 
 ---
 
-## Endpoint
+## Endpoints
 
 ### `POST /upload-recording`
 
@@ -43,6 +43,26 @@ Accepts a multipart form with:
 
 ---
 
+### `GET /cards/{user_id}`
+
+HTML page — a deck of name cards for all coffee chats belonging to `user_id`. Cards are sorted most recent first and include a company filter dropdown. No auth — share the URL privately.
+
+Example: `https://your-railway-url.up.railway.app/cards/michelle`
+
+---
+
+### `GET /api/notes/{user_id}`
+
+JSON endpoint backing the cards page.
+
+| Query param | Type | Description |
+|---|---|---|
+| `company` | string (optional) | Filter by company name (case-insensitive substring match) |
+
+**Response:** array of note objects sorted by `created_at` descending.
+
+---
+
 ## Environment Variables
 
 Set these in the Railway dashboard — do not commit them to GitHub.
@@ -54,6 +74,11 @@ Set these in the Railway dashboard — do not commit them to GitHub.
 | `AWS_REGION` | S3 bucket region (e.g. `us-east-1`) |
 | `AWS_S3_BUCKET_NAME` | S3 bucket name |
 | `PORT` | Set to `8000` on Railway |
+| `GROQ_API_KEY` | Groq API key for Whisper transcription |
+| `ANTHROPIC_API_KEY` | Anthropic API key for structured extraction |
+| `OPENAI_API_KEY` | OpenAI API key for embeddings |
+| `SUPABASE_URL` | Supabase project URL |
+| `SUPABASE_SERVICE_KEY` | Supabase service role key |
 
 ---
 
@@ -70,8 +95,13 @@ API docs available at `http://localhost:8000/docs`.
 
 ## What's Not Built Yet
 
-- **S3 → Transcription:** Send raw audio to Groq for transcription
-- **Extraction:** Pass transcript to Claude to extract structured info (person, company, key takeaways, follow-up actions)
-- **Storage:** Store extracted data in Supabase with pgvector for semantic search
-- **Authentication:** No auth on the API currently — anyone with the Railway URL can upload files
+- **Authentication:** No auth on the API currently — anyone with the Railway URL can upload files or view cards
 - **Multi-user support:** S3 separation by `user_id` is in place; Supabase isolation is not yet built
+- **Semantic search:** `match_coffee_chats` RPC function and `/search` endpoint not yet exposed
+
+---
+
+## Before Going Multi-User
+
+- **Enable Row Level Security (RLS)** on the `coffee_chat_notes` table in Supabase. RLS was skipped during initial setup because all access goes through the service key (single user). Before exposing this to other users, enable RLS and add a policy that filters rows by `user_id`.
+- **Add API authentication** to the Railway endpoint — each user should send a token in the request header so the API rejects unauthorized uploads.
