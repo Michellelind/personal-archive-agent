@@ -44,7 +44,7 @@ Accepts a multipart form with:
 
 **Response:**
 ```json
-{ "status": "success", "filename": "mlk268/recording_2026-04-30T14-00-00+00-00.m4a" }
+{ "status": "success", "filename": "{user_id}/recording_2026-04-30T14-00-00+00-00.m4a" }
 ```
 
 **Accepted content types:** `audio/mp4`, `audio/x-m4a`, `application/octet-stream` (iOS sends m4a as octet-stream).
@@ -55,7 +55,9 @@ Accepts a multipart form with:
 
 HTML page — a deck of name cards for all coffee chats belonging to `user_id`. Cards are sorted most recent first and include a company filter dropdown. No auth — share the URL privately.
 
-Example: `https://personal-archive-agent-production.up.railway.app/cards/mlk268`
+Example: `https://{your-railway-domain}.up.railway.app/cards/{your_user_id}`
+
+The `user_id` is the value you set in your iOS Shortcut's `user_id` form field. You can find it by opening the Shortcut on your phone, or by checking the folder name in your S3 bucket.
 
 ---
 
