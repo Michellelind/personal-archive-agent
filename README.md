@@ -11,7 +11,15 @@ iOS Shortcut
     ↓  HTTP POST (audio + timestamp + user_id)
 FastAPI app  (this repo, hosted on Railway)
     ↓  boto3
-AWS S3  →  [transcription + processing pipeline — not yet built]
+AWS S3 (raw .m4a storage)
+    ↓  background task on upload
+Groq Whisper (transcription)
+    ↓
+Claude claude-opus-4-7 (structured extraction: person, company, role, takeaways, follow-ups)
+    ↓
+OpenAI text-embedding-3-small (embedding)
+    ↓
+Supabase + pgvector (storage + semantic search)
 ```
 
 **iOS Shortcut trigger:** "Hey Siri, Voice Note" — records audio, captures ISO 8601 timestamp, POSTs to the Railway API endpoint.
@@ -86,7 +94,10 @@ Set these in the Railway dashboard — do not commit them to GitHub.
 
 ```bash
 pip install -r requirements.txt
-AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=... AWS_REGION=... AWS_S3_BUCKET_NAME=... uvicorn main:app --reload
+AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=... AWS_REGION=... AWS_S3_BUCKET_NAME=... \
+GROQ_API_KEY=... ANTHROPIC_API_KEY=... OPENAI_API_KEY=... \
+SUPABASE_URL=... SUPABASE_SERVICE_KEY=... \
+uvicorn main:app --reload
 ```
 
 API docs available at `http://localhost:8000/docs`.
